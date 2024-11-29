@@ -1,85 +1,12 @@
 import os
-from docx import Document
-import csv
-
-
-def analyze_document(docx_file):
-    """
-    Analyze the structure of the Word document (e.g., tables) and log it.
-    """
-    print(f"Analyzing document: {docx_file}")
-    doc = Document(docx_file)
-
-    # Analyze all tables in the document
-    for table_index, table in enumerate(doc.tables):
-        print(f"\nTable {table_index}:")
-        for row_index, row in enumerate(table.rows):
-            row_data = [cell.text.strip() for cell in row.cells]
-            print(f" Row {row_index}: {row_data}")
-
-
-def populate_table_0(table):
-    """
-    Populate specific fields in Table 0 with hardcoded data, handling shared rows.
-    """
-    # Hardcoded data for Table 0
-    table_0_data = {
-        "From:": "Ng, Wai Ming, Rock / 吳偉明 / 88888",
-        "To:": "Tendering Committee",
-        "Name of Property:": "AP- Apec Plaza",
-        "The Works:": "電機控制系統問題扶手鬆動滑輪/滑道磨損安全營示系統失靈：運行並確認問題維修過程需要專業技術人員進行,確保電梯/扶手電梯安全可靠運行",
-        "Tender Ref.:": "SHKP1234-001"
-    }
-
-    for row in table.rows:
-        cells = row.cells
-        if len(cells) >= 2:
-            for i, cell in enumerate(cells):
-                if cell.text.strip() in table_0_data:
-                    key = cell.text.strip()
-                    cells[i + 1].text = table_0_data[key]  # Place value in the next cell
-
-
-def populate_table_from_csv(doc, csv_file, table_index=1):
-    """
-    Populate Table 1 using data from a CSV file, handling empty rows and column alignment.
-    """
-    table = doc.tables[table_index]
-
-    # Map CSV headers to table column indices
-    header_map = {
-        "Serial No.": 0,
-        "Tenderer Name": 1,
-        "Tenderer Notified On": 2,
-    }
-
-    # Read CSV data
-    with open(csv_file, newline='', encoding='utf-8') as csvfile:
-        reader = csv.reader(csvfile)
-        headers = next(reader)  # Extract CSV header row
-
-        # Populate rows in the table
-        row_idx = 2  # Start after the header rows
-        for row_data in reader:
-            while row_idx < len(table.rows):
-                table_row = table.rows[row_idx]
-                if all(not cell.text.strip() for cell in table_row.cells):  # Skip empty rows
-                    row_idx += 1
-                    continue
-
-                for csv_col, table_col in header_map.items():
-                    if table_col < len(table_row.cells):
-                        table_row.cells[table_col].text = row_data[headers.index(csv_col)].strip()
-                row_idx += 1
-                break
-
+from docx_utils import *
 
 # File paths
 INPUT_DOCX = "input.docx"  # Replace with your actual .docx file path
 OUTPUT_DOCX = "output.docx"  # Path for the modified .docx file
 INPUT_CSV = "data.csv"  # Path to the CSV file
 
-# Ensure file exists
+# Ensure input files exist
 if not os.path.exists(INPUT_DOCX):
     print(f"Error: Input file '{INPUT_DOCX}' does not exist.")
     exit(1)
@@ -100,27 +27,77 @@ analyze_document(INPUT_DOCX)
 # Load the Word document
 doc = Document(INPUT_DOCX)
 
-# Step 2: Populate Table 0 with hardcoded data
-print("\nSTEP 2: Populating Table 0 with Hardcoded Data...")
-try:
-    populate_table_0(doc.tables[0])
-    print("Table 0 populated successfully.")
-except Exception as e:
-    print(f"Error during Table 0 population: {e}")
+# # Step 2: Populate Table 0 with hardcoded data
+# print("\nSTEP 2: Populating Table 0 with Hardcoded Data...")
+# try:
+#     populate_table_0(doc.tables[0])
+#     print("Table 0 populated successfully.")
+# except Exception as e:
+#     print(f"Error during Table 0 population: {e}")
+#
+# # Step 3: Populate Table 1 using CSV data
+# print("\nSTEP 3: Populating Table 1 from CSV...")
+# try:
+#     populate_table_from_csv(doc, INPUT_CSV, table_index=1)
+#     print("Table 1 populated successfully.")
+# except Exception as e:
+#     print(f"Error during Table 1 population: {e}")
 
-# Step 3: Populate Table 1 using CSV data
-print("\nSTEP 3: Populating Table 1 from CSV...")
-try:
-    populate_table_from_csv(doc, INPUT_CSV, table_index=1)
-    print("Table 1 populated successfully.")
-except Exception as e:
-    print(f"Error during Table 1 population: {e}")
+# Step 4: Modify the document (Add/Delete rows)
+modify_choice = input("Do you want to modify the document (add/delete rows)? (yes/no): ").strip().lower()
+
+if modify_choice in ["yes", "y"]:
+    while True:
+        # Console interaction for modifications
+        print("Choose an action: ")
+        print("1. Add a row")
+        print("2. Delete a row")
+        print("3. Exit modifications")
+        choice = input("Enter 1, 2, or 3: ").strip()
+
+        if choice == "1":
+            # Add a row
+            try:
+                table_index = int(input("Enter the table index (0, 1, etc.): "))
+                row_data = input("Enter row data as comma-separated values: ").split(",")
+                add_row_to_table(doc, table_index, row_data)
+                print(f"Row added to Table {table_index}.")
+            except Exception as e:
+                print(f"Error adding row: {e}")
+
+        elif choice == "2":
+            # Delete a row
+            try:
+                table_index = int(input("Enter the table index (0, 1, etc.): "))
+                row_number = int(input("Enter the row number to delete (starting from 0): "))
+                delete_row_from_table(doc, table_index, row_number)
+                print(f"Row {row_number} deleted from Table {table_index}.")
+            except Exception as e:
+                print(f"Error deleting row: {e}")
+
+        elif choice == "3":
+            print("Exiting modifications...")
+            break
+
+        else:
+            print("Invalid choice! Please enter 1, 2, or 3.")
+else:
+    print("No modifications requested.")
 
 # Save the modified document
 doc.save(OUTPUT_DOCX)
+print(f"Document saved as: {OUTPUT_DOCX}")
 
-# Step 4: Analyze the output document to verify changes
-print("\nSTEP 4: Analyzing Output Document")
-analyze_document(OUTPUT_DOCX)
+# Step 5: Convert to PDF
+OUTPUT_PDF = OUTPUT_DOCX.replace('.docx', '.pdf')
+try:
+    convert_to_pdf(os.path.abspath(OUTPUT_DOCX), os.path.abspath(OUTPUT_PDF))
+    # Automatically open the generated PDF file
+    if os.path.exists(OUTPUT_PDF):
+        os.startfile(OUTPUT_PDF)
+        print(f"PDF file opened: {OUTPUT_PDF}")
+except Exception as e:
+    print(f"Error during PDF conversion: {e}")
 
 print(f"\nProcess completed. Modified document saved as: {OUTPUT_DOCX}")
+print(f"PDF output saved as: {OUTPUT_PDF}")

@@ -1,7 +1,9 @@
 import os
 import zipfile
 import csv
-
+from docx.shared import Inches
+from PIL import Image
+from PIL import ImageOps
 from docx.oxml import OxmlElement
 from lxml import etree
 from docx import Document
@@ -18,15 +20,119 @@ def extract_docx(docx_path, extract_dir):
 
 def analyze_document(docx_file):
     """
-    Analyze the structure of the Word document (e.g., tables) and log it.
+    Analyze the structure of the Word document (e.g., tables) and log it,
+    including handling merged cells and skipping empty rows.
     """
     print(f"Analyzing document: {docx_file}")
     doc = Document(docx_file)
+
     for table_index, table in enumerate(doc.tables):
         print(f"\nTable {table_index}:")
         for row_index, row in enumerate(table.rows):
-            row_data = [cell.text.strip() for cell in row.cells]
-            print(f" Row {row_index}: {row_data}")
+            row_data = []
+            for cell in row.cells:
+                # Check if the cell is merged or empty
+                cell_text = cell.text.strip()
+                if not cell_text:
+                    cell_text = "<empty>"
+
+                # Append cell data to the row
+                row_data.append(cell_text)
+
+            # Skip rows that are completely empty
+            if all(cell == "<empty>" for cell in row_data):
+                print(f" Row {row_index}: <empty row>")
+            else:
+                print(f" Row {row_index}: {row_data}")
+
+
+def add_signature_to_cell(cell, image_path):
+    """
+    Add a signature image to a table cell, resize it, and adjust the row height.
+    :param cell: The table cell where the image will be added.
+    :param image_path: Path to the signature image file.
+    """
+    try:
+        print(f"Adding signature to cell: {image_path}")
+        # Clear existing text
+        cell.text = ""
+
+        # Get the approximate cell width
+        cell_width = get_cell_width(cell)
+        if not cell_width:
+            cell_width = 1.0  # Default to 1 inch if width cannot be determined
+
+        print(f"Cell width: {cell_width} inches")
+
+        # Open the image and resize it to fit the cell
+        with Image.open(image_path) as img:
+            aspect_ratio = img.width / img.height
+            img_width = cell_width * 96  # Convert inches to pixels (assuming 96 DPI)
+            img_height = img_width / aspect_ratio
+
+            print(f"Image resized to width: {img_width}px, height: {img_height}px")
+
+            # Save resized image to a temporary file
+            resized_image_path = "resized_signature.png"
+            img = img.resize((int(img_width), int(img_height)), Image.Resampling.LANCZOS)
+            img.save(resized_image_path)
+
+        # Add the resized image to the cell
+        paragraph = cell.paragraphs[0]
+        run = paragraph.add_run()
+        run.add_picture(resized_image_path, width=Inches(cell_width))
+
+        # Adjust the row height to fit the image
+        adjust_row_height(cell._tc, img_height)
+        print(f"Signature added successfully to cell.")
+    except Exception as e:
+        print(f"Error adding signature: {e}")
+
+def adjust_row_height(tc, img_height_px):
+    """
+    Adjust the row height to fit the signature and disable auto height adjustment.
+    :param tc: The table cell's underlying XML element.
+    :param img_height_px: The image height in pixels.
+    """
+    try:
+        print(f"Adjusting row height for image height: {img_height_px}px")
+        img_height_twips = int(img_height_px * 15)  # Convert pixels to twips
+        print(f"Calculated row height: {img_height_twips} twips")
+
+        # Get the parent row
+        tr = tc.getparent()
+        trPr = tr.get_or_add_trPr()
+
+        # Set row height
+        rowHeight = OxmlElement('w:trHeight')
+        rowHeight.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', str(img_height_twips))
+        rowHeight.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hRule', 'exact')
+        trPr.append(rowHeight)
+
+        print(f"Row height adjusted to: {img_height_twips} twips")
+    except Exception as e:
+        print(f"Error adjusting row height: {e}")
+
+
+def get_cell_width(cell):
+    """
+    Estimate the width of the cell in inches.
+    """
+    try:
+        namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        tcPr = cell._tc.get_or_add_tcPr()
+        tcW = tcPr.find("w:tcW", namespaces)  # Use namespace
+        if tcW is not None:
+            width_twips = int(tcW.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}w"))
+            width_inches = width_twips / 1440  # Convert twips to inches
+            return width_inches
+        else:
+            print("Cell width could not be determined; using default.")
+            return None
+    except Exception as e:
+        print(f"Error calculating cell width: {e}")
+        return None
+
 
 
 def modify_document_xml(document_xml_path, replacements):
@@ -87,23 +193,27 @@ def populate_table_from_csv(doc, csv_file, table_index=1):
     table = doc.tables[table_index]
 
     with open(csv_file, newline='', encoding='utf-8') as csvfile:
-        reader = csv.reader(csvfile)
-        headers = next(reader)
+        reader = csv.DictReader(csvfile)  # Use DictReader for column matching
 
-        row_idx = 2
-        for row_data in reader:
-            while row_idx < len(table.rows):
-                table_row = table.rows[row_idx]
-                if all(not cell.text.strip() for cell in table_row.cells):
-                    row_idx += 1
-                    continue
+        csv_rows = list(reader)  # Load all rows into memory for better control
+        csv_index = 0  # Track current CSV row being used
 
-                for csv_col, cell_data in zip(headers, row_data):
-                    for cell in table_row.cells:
-                        if csv_col.strip() == cell.text.strip():
-                            cell.text = cell_data.strip()
-                row_idx += 1
+        for row_index, table_row in enumerate(table.rows):
+            # Stop if all CSV rows are consumed
+            if csv_index >= len(csv_rows):
                 break
+
+            # Check if this row has empty cells to populate
+            if all(not cell.text.strip() for cell in table_row.cells):
+                csv_data = csv_rows[csv_index]  # Get current CSV row
+
+                # Populate cells based on CSV columns
+                for col_name, cell in zip(reader.fieldnames, table_row.cells):
+                    if col_name in csv_data:
+                        cell.text = csv_data[col_name]
+
+                csv_index += 1  # Move to the next CSV row
+
 
 
 def add_row_to_table(doc, table_index, row_data):

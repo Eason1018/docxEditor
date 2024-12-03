@@ -52,8 +52,9 @@ if modify_choice in ["yes", "y"]:
         print("Choose an action: ")
         print("1. Add a row")
         print("2. Delete a row")
-        print("3. Exit modifications")
-        choice = input("Enter 1, 2, or 3: ").strip()
+        print("3. Add a signature to a cell")
+        print("4. Exit modifications")
+        choice = input("Enter 1, 2, 3, or 4: ").strip()
 
         if choice == "1":
             # Add a row
@@ -75,14 +76,32 @@ if modify_choice in ["yes", "y"]:
             except Exception as e:
                 print(f"Error deleting row: {e}")
 
+
         elif choice == "3":
+
+            # Add a signature to a cell
+
+            try:
+
+                table_index = int(input("Enter the table index (0, 1, etc.): "))
+                row_index = int(input("Enter the row index (starting from 0): "))
+                column_index = int(input("Enter the column index (starting from 0): "))
+                image_path = input("Enter the path to the signature image: ")
+
+                table = doc.tables[table_index]
+                cell = table.rows[row_index].cells[column_index]
+                add_signature_to_cell(cell, image_path)
+                print(f"Signature added to Table {table_index}, Row {row_index}, Column {column_index}.")
+            except Exception as e:
+                print(f"Error adding signature: {e}")
+
+        elif choice == "4":
             print("Exiting modifications...")
             break
 
         else:
-            print("Invalid choice! Please enter 1, 2, or 3.")
-else:
-    print("No modifications requested.")
+            print("Invalid choice! Please enter 1, 2, 3, or 4.")
+
 
 # Save the modified document
 doc.save(OUTPUT_DOCX)
